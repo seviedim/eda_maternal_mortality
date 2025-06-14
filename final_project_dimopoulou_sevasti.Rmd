@@ -1,0 +1,247 @@
+---
+title: "Final Project on Data Science for Health Systems"
+author: "Sevasti Dimopoulou"
+date: "2024-06-06"
+output: html_document
+---
+
+# Libraries 
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+```
+
+# Loading the data
+```{r}
+# Loading the data
+maternal_mortality <- read.csv("main_data.csv")
+```
+
+
+# Data Cleaning
+```{r}
+# Inspecting the structure and summary statistics of the data
+str(maternal_mortality)
+summary(maternal_mortality)
+head(maternal_mortality)
+
+# Selecting relevant columns
+data <- maternal_mortality %>% 
+  select(iso_alpha_3_code, year_start, year_end, year_mid, obs_matdeaths, final_pm, env_total, env_mat)
+
+# Removing rows with missing values in key columns
+filtered_data <- data %>% 
+  filter(!is.na(obs_matdeaths) & !is.na(final_pm))
+
+# Filtering years to a reasonable range
+filtered_data <- filtered_data %>%
+  filter(year_mid >= 1980 & year_mid <= 2020)
+
+# Checking for outliers in 'obs_matdeaths' and 'final_pm'
+boxplot(filtered_data$obs_matdeaths, main = "Boxplot for Observed Maternal Deaths")
+boxplot(filtered_data$final_pm, main = "Boxplot for Proportional Mortality")
+
+# Handling outliers 
+# Here, I am capping outliers at the 99th percentile for illustration purposes
+
+# Defininhg a function to cap outliers
+cap_outliers <- function(x) {
+  q <- quantile(x, probs = c(0.01, 0.99), na.rm = TRUE)
+  x <- ifelse(x < q[1], q[1], ifelse(x > q[2], q[2], x))
+  return(x)
+}
+
+# Appling the function to 'obs_matdeaths' and 'final_pm'
+filtered_data$obs_matdeaths <- cap_outliers(filtered_data$obs_matdeaths)
+filtered_data$final_pm <- cap_outliers(filtered_data$final_pm)
+
+# Summary statistics after handling outliers
+summary(filtered_data)
+
+# Ensuring consistency in data types
+filtered_data <- filtered_data %>%
+  mutate(
+    iso_alpha_3_code = as.factor(iso_alpha_3_code),
+    year_start = as.integer(year_start),
+    year_end = as.integer(year_end),
+    year_mid = as.integer(year_mid),
+    obs_matdeaths = as.integer(obs_matdeaths),
+    final_pm = as.numeric(final_pm),
+    env_total = as.numeric(env_total),
+    env_mat = as.numeric(env_mat)
+  )
+
+```
+```{r}
+# Final inspection of cleaned data
+str(filtered_data)
+head(filtered_data)
+```
+
+# EDA
+
+## Distribution of Observed Maternal Deaths
+```{r}
+ggplot(filtered_data, aes(x = obs_matdeaths)) +
+  geom_histogram(binwidth = 100, fill = "blue", color = "black") +
+  labs(title = "Distribution of Observed Maternal Deaths", x = "Observed Maternal Deaths", y = "Frequency")
+
+```
+## Distribution of Proportional Mortality
+```{r}
+ggplot(filtered_data, aes(x = final_pm)) +
+  geom_histogram(binwidth = 0.005, fill = "green", color = "black") +
+  labs(title = "Distribution of Proportional Mortality", x = "Proportional Mortality", y = "Frequency")
+
+
+```
+
+
+## Distribution of Environmental Total
+
+```{r}
+ggplot(filtered_data, aes(x = env_total)) +
+  geom_histogram(binwidth = 1000, fill = "red", color = "black") +
+  labs(title = "Distribution of Environmental Total", x = "Environmental Total", y = "Frequency")
+
+```
+
+
+
+## Distribution of Environmental Maternal
+```{r}
+ggplot(filtered_data, aes(x = env_mat)) +
+  geom_histogram(binwidth = 100, fill = "purple", color = "black") +
+  labs(title = "Distribution of Environmental Maternal", x = "Environmental Maternal", y = "Frequency")
+
+```
+
+
+
+##Total Maternal Deaths Over Time
+
+```{r}
+yearly_summary <- filtered_data %>% 
+  group_by(year_mid) %>% 
+  summarize(total_deaths = sum(obs_matdeaths), 
+            average_pm = mean(final_pm, na.rm = TRUE))
+
+ggplot(yearly_summary, aes(x = year_mid, y = total_deaths)) +
+  geom_line() +
+  labs(title = "Total Maternal Deaths Over Time", x = "Year", y = "Total Maternal Deaths")
+
+
+```
+
+
+## Average Proportional Mortality Over Time
+```{r}
+ggplot(yearly_summary, aes(x = year_mid, y = average_pm)) +
+  geom_line() +
+  labs(title = "Average Proportional Mortality Over Time", x = "Year", y = "Average PM")
+
+
+```
+## Summary Table for Countries
+```{r}
+summary_table <- filtered_data %>% 
+  group_by(iso_alpha_3_code) %>% 
+  summarize(mean_pm = mean(final_pm, na.rm = TRUE), 
+            total_deaths = sum(obs_matdeaths)) %>%
+  arrange(desc(total_deaths))
+
+print(summary_table)
+
+```
+
+# Regional Analysis: Total Maternal Deaths Over Time
+
+```{r}
+# Filtering to top 10 countries with the most observations
+top_countries <- filtered_data %>%
+  group_by(iso_alpha_3_code) %>%
+  summarize(count = n()) %>%
+  top_n(10, wt = count) %>%
+  pull(iso_alpha_3_code)
+
+filtered_top_countries <- filtered_data %>%
+  filter(iso_alpha_3_code %in% top_countries)
+
+# Boxplot of Maternal Deaths by Top Countries
+ggplot(filtered_top_countries, aes(x = reorder(iso_alpha_3_code, obs_matdeaths, FUN = median), y = obs_matdeaths)) +
+  geom_boxplot(fill = "lightblue") +
+  labs(title = "Boxplot of Maternal Deaths by Top 10 Countries", x = "Country", y = "Maternal Deaths") +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+## South America
+
+```{r}
+# Creating  the country_yearly_summary dataframe
+country_yearly_summary <- filtered_data %>%
+  group_by(iso_alpha_3_code, year_mid) %>%
+  summarise(total_deaths = sum(obs_matdeaths, na.rm = TRUE))
+
+ggplot(country_yearly_summary %>% filter(iso_alpha_3_code %in% c("BRA", "CHL", "ECU")), 
+       aes(x = year_mid, y = total_deaths, color = iso_alpha_3_code)) +
+  geom_line() +
+  labs(title = "Total Maternal Deaths Over Time (South America)", x = "Year", y = "Total Maternal Deaths") +
+  scale_color_discrete(name = "Country")
+
+```
+
+```{r}
+# ASIA 
+# Plotting total maternal deaths by year for multiple countries
+ggplot(country_yearly_summary %>% filter(iso_alpha_3_code %in% c("MYS", "KAZ", "KOR")), 
+       aes(x = year_mid, y = total_deaths, color = iso_alpha_3_code)) +
+  geom_line() +
+  labs(title = "Total Maternal Deaths Over Time (Multiple Countries)", x = "Year", y = "Total Maternal Deaths") +
+  scale_color_discrete(name = "Country")
+
+```
+```{r}
+# Comparative Analysis
+
+# Plotting total maternal deaths by year for multiple countries
+ggplot(country_yearly_summary %>% filter(iso_alpha_3_code %in% c("AUS", "USA", "GBR")), 
+       aes(x = year_mid, y = total_deaths, color = iso_alpha_3_code)) +
+  geom_line() +
+  labs(title = "Total Maternal Deaths Over Time (Multiple Countries)", x = "Year", y = "Total Maternal Deaths") +
+  scale_color_discrete(name = "Country")
+```
+
+```{r}
+# Linear regression to analyze trends in proportional mortality
+model <- lm(final_pm ~ year_mid, data = filtered_data)
+summary(model)
+
+# Plotting regression line
+ggplot(filtered_data, aes(x = year_mid, y = final_pm)) +
+  geom_point() +
+  geom_smooth(method = "lm", col = "red") +
+  labs(title = "Trend in Proportional Mortality Over Time", x = "Year", y = "Proportional Mortality")
+
+```
+## summary table
+```{r}
+summary_table <- filtered_data %>% 
+  group_by(iso_alpha_3_code) %>% 
+  summarize(mean_pm = mean(final_pm, na.rm = TRUE), 
+            total_deaths = sum(obs_matdeaths)) %>%
+  arrange(desc(total_deaths))
+
+print(summary_table)
+```
+
+
+
+
+
+
+
+
+
